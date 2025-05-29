@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 
 public class TalentGraphLayout : MonoBehaviour
@@ -114,43 +115,94 @@ public class TalentGraphLayout : MonoBehaviour
         for (int gi = 1; gi < nodeGroups.Length; gi++)
         {
             var group = nodeGroups[gi];
-            int groupSize = group.Length;
-            for (int i = 0; i < groupSize; i++)
+            // order nodes by the average x-axis position of their parents, if present.
+            // this does not guarantee a correct layout on its own, but can simplify the process a great deal.
+            var sorted = group.OrderBy(n =>
             {
-                var node = group[i];
-                var nodeTransform = node.RuntimeInstance;
-                var iParents = node.ParentIndices;
-                for (int j = i + 1; j < groupSize; j++)
-                {
-                    var otherNode = group[j];
-                    var otherNodeTransform = otherNode.RuntimeInstance;
-                    var jParents = otherNode.ParentIndices;
-
-                    for (int pi = 0; pi < iParents.Length; pi++)
-                    {
-                        for (int pj = 0; pj < jParents.Length; pj++)
-                        {
-                            if (iParents[pi] == jParents[pj])
-                                continue;
-                            var ipPos = nodes[iParents[pi]].RuntimeInstance.anchoredPosition;
-                            var iPos = nodeTransform.anchoredPosition;
-                            var jpPos = nodes[jParents[pj]].RuntimeInstance.anchoredPosition;
-                            var jPos = otherNodeTransform.anchoredPosition;
-                            // swap to nodes positions to remove a crossing.
-                            // this only works out when it is possible.
-                            // if there still are crossings in this layer after this step, the parent sub-graphs need to be re-ordered.
-                            if ((ipPos.x < jpPos.x && iPos.x > jPos.x) || (ipPos.x > jpPos.x && iPos.x < jPos.x))
-                            {
-                                node.RuntimeInstance.anchoredPosition = jPos;
-                                otherNode.RuntimeInstance.anchoredPosition = iPos;
-                            }
-                        }
-                    }
-                }
+                if (n.ParentIndices.Length == 0)
+                    return 0;
+                else return n.ParentIndices.Sum(pi => nodes[pi].RuntimeInstance.anchoredPosition.x) / n.ParentIndices.Length;
+            });
+            int i = 0;
+            foreach (var node in sorted)
+            {
+                node.RuntimeInstance.anchoredPosition = new Vector2(i++ * preferredSpacing, node.RuntimeInstance.anchoredPosition.y);
             }
+            // there may still be crossings at this point.
+            // maybe try re-ordering the parents that cause the crossing, then go up the graphs layers
+            // to check whether this introduces new crossings.
+            // note for later: does it help for layout to know whether a layer has fewer nodes than the previous layer?
+            // note for later: how do we handle when there are multiple children and one skips a layer?
         }
         Debug.Log("minimized crossings");
         yield return null;
+    }
+
+    private void MinimizeCrossingsInGroup(TalentNode[] group)
+    {
+        int groupSize = group.Length;
+        for (int i = 0; i < groupSize; i++)
+        {
+            var node = group[i];
+            var iParents = node.ParentIndices;
+            for (int j = i + 1; j < groupSize; j++)
+            {
+                var otherNode = group[j];
+                var jParents = otherNode.ParentIndices;
+                EliminateCrossing(node, iParents, otherNode, jParents);
+            }
+        }
+    }
+
+    private void EliminateCrossing(TalentNode first, int[] iParents, TalentNode second, int[] jParents)
+    {
+        if (HaveCrossing(first, iParents, second, jParents))
+        {
+            (first.RuntimeInstance.anchoredPosition, second.RuntimeInstance.anchoredPosition)
+                = (second.RuntimeInstance.anchoredPosition, first.RuntimeInstance.anchoredPosition);
+        }
+    }
+
+    private bool HaveCrossingInGroup(TalentNode[] group)
+    {
+        int groupSize = group.Length;
+        for (int i = 0; i < groupSize; i++)
+        {
+            var node = group[i];
+            var iParents = node.ParentIndices;
+            for (int j = i + 1; j < groupSize; j++)
+            {
+                var otherNode = group[j];
+                var jParents = otherNode.ParentIndices;
+                if (HaveCrossing(node, iParents, otherNode, jParents))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private bool HaveCrossing(TalentNode first, int[] firstParents, TalentNode second, int[] secondParents)
+    {
+        for (int pi = 0; pi < firstParents.Length; pi++)
+        {
+            for (int pj = 0; pj < secondParents.Length; pj++)
+            {
+                if (firstParents[pi] == secondParents[pj])
+                    continue;
+                var ipPos = nodes[firstParents[pi]].RuntimeInstance.anchoredPosition;
+                var iPos = first.RuntimeInstance.anchoredPosition;
+                var jpPos = nodes[secondParents[pj]].RuntimeInstance.anchoredPosition;
+                var jPos = second.RuntimeInstance.anchoredPosition;
+                // swap to nodes positions to remove a crossing.
+                // this only works out when it is possible.
+                // if there still are crossings in this layer after this step, the parent sub-graphs need to be re-ordered.
+                if ((ipPos.x < jpPos.x && iPos.x > jPos.x) || (ipPos.x > jpPos.x && iPos.x < jPos.x))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void Update()
