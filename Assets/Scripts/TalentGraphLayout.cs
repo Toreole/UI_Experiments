@@ -27,6 +27,8 @@ public class TalentGraphLayout : MonoBehaviour
     private float driftDivider = 5;
     [SerializeField]
     private float driftCoefficient = 0.02f;
+    [SerializeField]
+    private int simulationIterations = 100;
 
     private TalentNode[] nodes;
     private TalentNode[][] groups;
@@ -38,17 +40,16 @@ public class TalentGraphLayout : MonoBehaviour
         Update();
     }
 
-    IEnumerator Start()
+    void Start()
     {
         if (graph == null)
-            yield break;
+            return;
         _lastGraph = graph;
         nodes = graph.Nodes;
         // order of operations is absolutely vital:
         ShuffleNodes();
         // shuffle before doing any other calculations.
         CalculateNodeDepths();
-        yield return null;
 
         // instantiating the nodes.
         foreach (var node in nodes.OrderBy(x => x.RuntimeLevel))
@@ -60,7 +61,6 @@ public class TalentGraphLayout : MonoBehaviour
             //  Debug.Log(instance.sizeDelta); 50x50
         }
         Debug.Log("instantiated");
-        yield return null;
 
         //now do layout.
         //goal is that nodes dont overlap one another.
@@ -91,7 +91,6 @@ public class TalentGraphLayout : MonoBehaviour
             }
         }
         Debug.Log("groups formed");
-        yield return null;
 
         // reverse edges:
         childNodes = new int[nodes.Length][];
@@ -106,7 +105,6 @@ public class TalentGraphLayout : MonoBehaviour
             childNodes[i] = children.ToArray();
         }
         Debug.Log("reverse edges");
-        yield return null;
 
         // hard layout.
         for (int gi = 0; gi < groups.Length; gi++)
@@ -120,13 +118,18 @@ public class TalentGraphLayout : MonoBehaviour
             }
         }
         Debug.Log("basic layout");
-        yield return null;
-        yield break; // DONT DO ANY OF THIS
+
+        for (int iter = 0; iter < simulationIterations; iter++)
+        {
+            DriftNodes();
+        }
+
+        return; // DONT DO ANY OF THIS
         // minimize crossings in each layer after the first.
         // crossings can only happen, when the nodes have at least one different parent.
         for (int gi = 1; gi < groups.Length; gi++)
         {
-            yield return new WaitForSeconds(0.5f);
+            //yield return new WaitForSeconds(0.5f);
             var group = groups[gi];
             SortGroupByAverageParentPosition(group);
            
@@ -134,13 +137,13 @@ public class TalentGraphLayout : MonoBehaviour
             // maybe try re-ordering the parents that cause the crossing, then go up the graphs layers
             if (GroupHasCrossingsToParentLayer(group))
             {
-                yield return new WaitForSeconds(0.5f);
+                //yield return new WaitForSeconds(0.5f);
                 Debug.Log($"still had crossings after initial sort - layer {gi}");
                 SortGroupByAverageChildPosition(groups[gi-1], childNodes);
-                yield return new WaitForSeconds(0.5f);
+                //yield return new WaitForSeconds(0.5f);
                 //re-sort current group.
                 SortGroupByAverageParentPosition(group);
-                yield return new WaitForSeconds(0.5f);
+                //yield return new WaitForSeconds(0.5f);
 
                 //EliminateChildCrossingsInGroup(group, childNodes);
                 //var resortParents = nodeGroups[gi - 1].OrderBy(n =>
@@ -161,7 +164,7 @@ public class TalentGraphLayout : MonoBehaviour
             // note for later: how do we handle when there are multiple children and one skips a layer?
         }
         Debug.Log("minimized crossings");
-        yield return null;
+        //yield return null;
     }
 
     private void SortGroupByAverageParentPosition(TalentNode[] group)
@@ -315,12 +318,12 @@ public class TalentGraphLayout : MonoBehaviour
         {
             for (int i = transform.childCount - 1; i >= 0; i--)
                 Destroy(transform.GetChild(i).gameObject);
-
-            StartCoroutine(Start());
+            Start();
+            //StartCoroutine(Start());
         }
         if (nodes == null)
             return;
-        DriftNodes();
+        //DriftNodes();
         foreach (var node in nodes)
         {
             foreach (var pi in node.ParentIndices)
