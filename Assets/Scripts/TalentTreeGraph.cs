@@ -56,8 +56,10 @@ public class TalentNode
     public bool HasParent => parentIndices.Length > 0;
     public int RuntimeLevel { get; set; } = 0;
     public RectTransform RuntimeInstance { get; set; }
+    public Rigidbody2D Body { get; set; }
     public int NodeIndex { get; set; } = -1;
     public NodeClass NodeClass { get; set; } = NodeClass.Unknown;
+    public float Drift { get; set; }
 
 }
 
