@@ -151,53 +151,9 @@ public class TalentGraphLayout : MonoBehaviour
         // after drifting all the nodes for the set iterations, assume they are ordered correctly
         // all it needs now is the final placement.
 
-        // start at the top left most root node.
-        var startNode = groups[0].OrderBy(x => x.PosX).First();
-        var nodeOrder = new List<int>(nodes.Length);
-        // first: anchor node index, second: -1/0/1 relative position.
-        var nodeAnchors = new Tuple<int, int>[nodes.Length];
-        nodeAnchors[startNode.NodeIndex] = new(-1, -1); //startNode is its own anchor.
-        var parentQueue = new Queue<int>();
-        parentQueue.Enqueue(startNode.NodeIndex);
-        var childQueue = new Queue<int>();
-        
-        while (nodeOrder.Count < nodes.Length)
-        {
-            var currentNodeIndex = parentQueue.Count == 0 ? childQueue.Dequeue() : parentQueue.Dequeue();
-            var currentNode = nodes[currentNodeIndex];
-            nodeOrder.Add(currentNodeIndex);
+ 
 
-            var parents = currentNode.ParentIndices;
-            var children = childNodes[currentNodeIndex];
-            // queue all currently unknown related nodes.
-            foreach(var p in parents)
-                if (nodeAnchors[p] == null)
-                    parentQueue.Enqueue(p);
-            foreach (var c in children)
-                if (nodeAnchors[c] == null)
-                    parentQueue.Enqueue(c);
-
-
-        }
-
-        // this node will be the first node to be "fixed" in position. (tracked as a 2d integer?)
-        // then: examine its children by their relative x position.
-        // for 2 children: figure out whether each is left, right, or directly under this node. (minimum x distance + sign) -> minimumSeparationX
-        // for 1 child: same
-        // for 3 children: the two children with the most absolute x distance are left/right, the other is directly under it.
-        // note: relative positions can be simplified by sorting them based on ascending position (left to right)
-
-
-        // repeatedly examine previously unknown parent nodes, before continuing to process child nodes.
-        // then examine other parent nodes of these children, based on their relative x positions again, the same thing.
-
-        // result: each node will have one relative anchor, and one relative position. layers dont really matter a lot for this.
-        // result: the order of nodes, in which order they have been processed like this.
-
-        // with these result
-        // once all the relative positions have been figured out, assign real positions to them.
-        // for that, start at any node
-
+#nullable disable
 
         return; // DONT DO ANY OF THIS
         // minimize crossings in each layer after the first.
@@ -242,6 +198,124 @@ public class TalentGraphLayout : MonoBehaviour
         //yield return null;
     }
 
+
+    private void CalculateFinalLayoutAfterPhysicsSim()
+    {
+        // start at the top left most root node.
+        var startNode = groups[0].OrderBy(x => x.PosX).First();
+        var nodeOrder = new List<int>(nodes.Length);
+        // first: anchor node index, second: -1/0/1 relative position.
+#nullable enable
+        var nodeAnchors = new Tuple<int, int>?[nodes.Length];
+        nodeAnchors[startNode.NodeIndex] = new(-1, -1); //startNode is its own anchor.
+        var parentQueue = new Queue<int>();
+        parentQueue.Enqueue(startNode.NodeIndex);
+        var childQueue = new Queue<int>();
+
+        while (nodeOrder.Count < nodes.Length && (childQueue.Count > 0 || parentQueue.Count > 0))
+        {
+            var currentNodeIndex = parentQueue.Count == 0 ? childQueue.Dequeue() : parentQueue.Dequeue();
+            Debug.Log($"processing node {currentNodeIndex}");
+            var currentNode = nodes[currentNodeIndex];
+            nodeOrder.Add(currentNodeIndex);
+
+            var parents = currentNode.ParentIndices;
+            var children = childNodes[currentNodeIndex];
+            // queue all currently unknown related nodes.
+            foreach (var p in parents)
+            {
+                if (nodeAnchors[p] != null)
+                    continue;
+                parentQueue.Enqueue(p);
+                var parentNode = nodes[p];
+                var diff = parentNode.PosX - currentNode.PosX;
+                if (Math.Abs(diff) <= minimumSeparationX)
+                    nodeAnchors[p] = new(currentNodeIndex, 0);
+                else
+                    nodeAnchors[p] = new(currentNodeIndex, Math.Sign(diff));
+            }
+            // handle child nodes.
+            if (children.Length == 3)
+            {
+                // left to right.
+                var sortedChildren = children.Select(ci => nodes[ci]).OrderBy(x => x.PosX).ToArray();
+                for (int i = 0; i <= 2; i++)
+                {
+                    // skip nodes that already have an anchor.
+                    if (nodeAnchors[sortedChildren[i].NodeIndex] != null)
+                    {
+                        //Debug.Log($"child node already had anchor: {nodeAnchors[sortedChildren[i].NodeIndex]}");
+                        continue;
+                    }
+                    childQueue.Enqueue(sortedChildren[i].NodeIndex);
+                    nodeAnchors[sortedChildren[i].NodeIndex] = new(currentNodeIndex, i - 1);
+                }
+            }
+            else if (children.Length <= 2)
+            {
+                bool hasMiddle = false;
+                for (int i = 0; i < children.Length; i++)
+                {
+                    var child = nodes[children[i]];
+                    if (nodeAnchors[child.NodeIndex] != null)
+                    {
+                        //Debug.Log($"child node already had anchor: {nodeAnchors[child.NodeIndex]}");
+                        continue;
+                    }
+                    childQueue.Enqueue(child.NodeIndex);
+                    // too close - middle.
+                    if (!hasMiddle && Math.Abs(child.PosX - currentNode.PosX) <= minimumSeparationX)
+                    {
+                        hasMiddle = true;
+                        nodeAnchors[child.NodeIndex] = new(currentNodeIndex, 0);
+                    }
+                    else // to either side based on sign.
+                        nodeAnchors[child.NodeIndex] = new(currentNodeIndex, Math.Sign(child.PosX - currentNode.PosX));
+                }
+            }
+        }
+
+        // this node will be the first node to be "fixed" in position. (tracked as a 2d integer?)
+        // then: examine its children by their relative x position.
+        // for 2 children: figure out whether each is left, right, or directly under this node. (minimum x distance + sign) -> minimumSeparationX
+        // for 1 child: same
+        // for 3 children: the two children with the most absolute x distance are left/right, the other is directly under it.
+        // note: relative positions can be simplified by sorting them based on ascending position (left to right)
+
+
+        // repeatedly examine previously unknown parent nodes, before continuing to process child nodes.
+        // then examine other parent nodes of these children, based on their relative x positions again, the same thing.
+
+        // result: each node will have one relative anchor, and one relative position. layers dont really matter a lot for this.
+        // result: the order of nodes, in which order they have been processed like this.
+
+        // with these result
+        // once all the relative positions have been figured out, assign real positions to them.
+        // for that, start at any node
+
+        //Debug.Log($"Order length: {nodeOrder.Count}");
+        for (int i = 0; i < nodeOrder.Count; i++)
+        {
+            var currentNodeIndex = nodeOrder[i];
+            var currentNode = nodes[currentNodeIndex];
+            var anchor = nodeAnchors[currentNode.NodeIndex];
+
+            string readable = anchor!.Item2 switch
+            {
+                -1 => "left",
+                0 => "middle",
+                1 => "right",
+                _ => "unknown"
+            };
+            // Debug.Log($"Node {currentNodeIndex} placed {readable} of node {anchor.Item1}");
+
+            // this is the first node, which does not have an anchor. simple.
+            if (anchor.Item1 == -1)
+                continue;
+
+            currentNode.Position = new Vector2(nodes[anchor.Item1].PosX + (anchor.Item2 * preferredSpacing), -currentNode.RuntimeLevel * preferredSpacing);
+        }
+    }
     private void SortGroupByAverageParentPosition(TalentNode[] group)
     {
         // order nodes by the average x-axis position of their parents, if present.
@@ -395,6 +469,10 @@ public class TalentGraphLayout : MonoBehaviour
         }
         if (nodes == null)
             return;
+
+        if (Input.GetKeyDown(KeyCode.Space))
+            CalculateFinalLayoutAfterPhysicsSim();
+
         //DriftNodes();
         foreach (var node in nodes)
         {
@@ -403,7 +481,7 @@ public class TalentGraphLayout : MonoBehaviour
                 Color color = node.RuntimeLevel - nodes[pi].RuntimeLevel > 1 ? Color.red : Color.white; 
                 Debug.DrawLine(node.RuntimeInstance.position, nodes[pi].RuntimeInstance.position, color);
             }
-            Debug.DrawLine(node.RuntimeInstance.position, node.RuntimeInstance.position + new Vector3(0,800, 0), Color.green);
+            //Debug.DrawLine(node.RuntimeInstance.position, node.RuntimeInstance.position + new Vector3(0,800, 0), Color.green);
         }
     }
 
