@@ -586,6 +586,7 @@ MonoBehaviour:
   layoutWidth: 700
   driftDivider: 150
   driftCoefficient: 0.035
+  simulationIterations: 10000
 --- !u!1 &2137776725
 GameObject:
   m_ObjectHideFlags: 0

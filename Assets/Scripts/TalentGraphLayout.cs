@@ -30,6 +30,9 @@ public class TalentGraphLayout : MonoBehaviour
     [SerializeField]
     private int simulationIterations = 100;
 
+    [SerializeField]
+    private float minimumSeparationX = 4f;
+
     private TalentNode[] nodes;
     private TalentNode[][] groups;
     private int[][] childNodes;
@@ -85,9 +88,7 @@ public class TalentGraphLayout : MonoBehaviour
             foreach (var node in group)
             {
                 var justifiedPos = (layoutWidth / (groupSize + 1)) * i++;
-                var pos = node.RuntimeInstance.anchoredPosition;
-                pos.x = justifiedPos + offset;
-                node.RuntimeInstance.anchoredPosition = pos;
+                node.PosX = justifiedPos + offset;
             }
         }
         Debug.Log("groups formed");
@@ -114,15 +115,89 @@ public class TalentGraphLayout : MonoBehaviour
             for (int i = 0; i < groupSize; i++)
             {
                 var node = group[i];
-                node.RuntimeInstance.anchoredPosition = new Vector2(preferredSpacing * i, -preferredSpacing * gi); // gi == depth;
+                node.Position = new Vector2(preferredSpacing * i, -preferredSpacing * gi); // gi == depth;
             }
         }
         Debug.Log("basic layout");
 
+        //for (int iter = 0; iter < 20; iter++)
+        //{
+        //    for (int i = 1; i < groups.Length-1; i++)
+        //    {
+        //        EliminateParentCrossingInGroup(groups[i]);
+        //    }
+        //    for (int i = groups.Length - 2; i > 0; i--)
+        //    {
+        //        EliminateChildCrossingsInGroup(groups[i]);
+        //    }
+        //    //for (int i = 1; i < groups.Length; i++)
+        //}
+
         for (int iter = 0; iter < simulationIterations; iter++)
         {
             DriftNodes();
+            bool stillDrifting = false;
+            foreach(var node in nodes)
+            {
+                if (node.Drift > 0)
+                    stillDrifting = true;
+            }
+            if (!stillDrifting)
+            {
+                Debug.Log($"Stopped after {iter} iterations");
+                break;
+            }
         }
+        // after drifting all the nodes for the set iterations, assume they are ordered correctly
+        // all it needs now is the final placement.
+
+        // start at the top left most root node.
+        var startNode = groups[0].OrderBy(x => x.PosX).First();
+        var nodeOrder = new List<int>(nodes.Length);
+        // first: anchor node index, second: -1/0/1 relative position.
+        var nodeAnchors = new Tuple<int, int>[nodes.Length];
+        nodeAnchors[startNode.NodeIndex] = new(-1, -1); //startNode is its own anchor.
+        var parentQueue = new Queue<int>();
+        parentQueue.Enqueue(startNode.NodeIndex);
+        var childQueue = new Queue<int>();
+        
+        while (nodeOrder.Count < nodes.Length)
+        {
+            var currentNodeIndex = parentQueue.Count == 0 ? childQueue.Dequeue() : parentQueue.Dequeue();
+            var currentNode = nodes[currentNodeIndex];
+            nodeOrder.Add(currentNodeIndex);
+
+            var parents = currentNode.ParentIndices;
+            var children = childNodes[currentNodeIndex];
+            // queue all currently unknown related nodes.
+            foreach(var p in parents)
+                if (nodeAnchors[p] == null)
+                    parentQueue.Enqueue(p);
+            foreach (var c in children)
+                if (nodeAnchors[c] == null)
+                    parentQueue.Enqueue(c);
+
+
+        }
+
+        // this node will be the first node to be "fixed" in position. (tracked as a 2d integer?)
+        // then: examine its children by their relative x position.
+        // for 2 children: figure out whether each is left, right, or directly under this node. (minimum x distance + sign) -> minimumSeparationX
+        // for 1 child: same
+        // for 3 children: the two children with the most absolute x distance are left/right, the other is directly under it.
+        // note: relative positions can be simplified by sorting them based on ascending position (left to right)
+
+
+        // repeatedly examine previously unknown parent nodes, before continuing to process child nodes.
+        // then examine other parent nodes of these children, based on their relative x positions again, the same thing.
+
+        // result: each node will have one relative anchor, and one relative position. layers dont really matter a lot for this.
+        // result: the order of nodes, in which order they have been processed like this.
+
+        // with these result
+        // once all the relative positions have been figured out, assign real positions to them.
+        // for that, start at any node
+
 
         return; // DONT DO ANY OF THIS
         // minimize crossings in each layer after the first.
@@ -151,12 +226,12 @@ public class TalentGraphLayout : MonoBehaviour
                 //    if (childNodes[n.NodeIndex].Length == 0)
                 //        return 0;
                 //    else
-                //        return childNodes[n.NodeIndex].Sum(pi => nodes[pi].RuntimeInstance.anchoredPosition.x ) / childNodes[n.NodeIndex].Length;
+                //        return childNodes[n.NodeIndex].Sum(pi => nodes[pi].PosX ) / childNodes[n.NodeIndex].Length;
                 //});
                 //i = 0;
                 //foreach (var node in resortParents)
                 //{
-                //    node.RuntimeInstance.anchoredPosition = new Vector2(i++ * preferredSpacing, node.RuntimeInstance.anchoredPosition.y);
+                //    node.Position = new Vector2(i++ * preferredSpacing, node.Position.y);
                 //}
             }
             // to check whether this introduces new crossings.
@@ -175,17 +250,12 @@ public class TalentGraphLayout : MonoBehaviour
         {
             if (n.ParentIndices.Length == 0)
                 return 0;
-            var nodeLevel = n.RuntimeLevel;
-            return n.ParentIndices.Sum(pi =>
-            {
-                var levelDifference = Math.Abs(nodes[pi].RuntimeLevel - nodeLevel);
-                return (levelDifference == 1) ? nodes[pi].RuntimeInstance.anchoredPosition.x : 0;
-            }) / n.ParentIndices.Length;
+            return n.ParentIndices.Sum(pi => nodes[pi].Position.x) / n.ParentIndices.Length;
         });
         int i = 0;
         foreach (var node in sorted)
         {
-            node.RuntimeInstance.anchoredPosition = new Vector2(i++ * preferredSpacing, node.RuntimeInstance.anchoredPosition.y);
+            node.Position = new Vector2(i++ * preferredSpacing, node.Position.y);
         }
     }
 
@@ -202,17 +272,17 @@ public class TalentGraphLayout : MonoBehaviour
             return children.Sum(ci =>
             {
                 var levelDifference = Math.Abs(nodes[ci].RuntimeLevel - nodeLevel);
-                return (levelDifference == 1) ? nodes[ci].RuntimeInstance.anchoredPosition.x : 0;
+                return (levelDifference == 1) ? nodes[ci].PosX : 0;
             }) / children.Length;
         });
         int i = 0;
         foreach (var node in sorted)
         {
-            node.RuntimeInstance.anchoredPosition = new Vector2(i++ * preferredSpacing, node.RuntimeInstance.anchoredPosition.y);
+            node.Position = new Vector2(i++ * preferredSpacing, node.Position.y);
         }
     }
 
-    private void EliminateChildCrossingsInGroup(TalentNode[] group, int[][] childNodes)
+    private void EliminateChildCrossingsInGroup(TalentNode[] group)
     {
         for (int i = 0; i < group.Length-1; i++)
         {
@@ -227,25 +297,27 @@ public class TalentGraphLayout : MonoBehaviour
 
     private void EliminateChildCrossing(TalentNode nodeA, int[] childrenOfA, TalentNode nodeB, int[] childrenOfB)
     {
-        var ax = nodeA.RuntimeInstance.anchoredPosition.x;
-        var bx = nodeB.RuntimeInstance.anchoredPosition.x;
+        var ax = nodeA.PosX;
+        var bx = nodeB.PosX;
         for (int i = 0; i < childrenOfA.Length; i++)
         {
-            var childAX = nodes[childrenOfA[i]].RuntimeInstance.anchoredPosition.x;
+            var childAX = nodes[childrenOfA[i]].PosX;
             for (int j = 0; j < childrenOfB.Length; j++)
             {
-                var childBX = nodes[childrenOfA[i]].RuntimeInstance.anchoredPosition.x;
+                if (childrenOfA[i] == childrenOfB[j])
+                    continue;
+                var childBX = nodes[childrenOfA[i]].PosX;
                 if ((ax < bx && childAX > childBX) || (ax > bx && childAX < childBX))
                 {
-                    (nodeA.RuntimeInstance.anchoredPosition, nodeB.RuntimeInstance.anchoredPosition) 
-                        = (nodeB.RuntimeInstance.anchoredPosition, nodeA.RuntimeInstance.anchoredPosition);
+                    (nodeA.Position, nodeB.Position) 
+                        = (nodeB.Position, nodeA.Position);
                     return;
                 }
             }
         }
     }
 
-    private void MinimizeCrossingsInGroup(TalentNode[] group)
+    private void EliminateParentCrossingInGroup(TalentNode[] group)
     {
         int groupSize = group.Length;
         for (int i = 0; i < groupSize; i++)
@@ -265,8 +337,8 @@ public class TalentGraphLayout : MonoBehaviour
     {
         if (NodesHaveCrossing(first, iParents, second, jParents))
         {
-            (first.RuntimeInstance.anchoredPosition, second.RuntimeInstance.anchoredPosition)
-                = (second.RuntimeInstance.anchoredPosition, first.RuntimeInstance.anchoredPosition);
+            (first.Position, second.Position)
+                = (second.Position, first.Position);
         }
     }
 
@@ -296,10 +368,10 @@ public class TalentGraphLayout : MonoBehaviour
             {
                 if (firstParents[pi] == secondParents[pj])
                     continue;
-                var ipPos = nodes[firstParents[pi]].RuntimeInstance.anchoredPosition;
-                var iPos = first.RuntimeInstance.anchoredPosition;
-                var jpPos = nodes[secondParents[pj]].RuntimeInstance.anchoredPosition;
-                var jPos = second.RuntimeInstance.anchoredPosition;
+                var ipPos = nodes[firstParents[pi]].Position;
+                var iPos = first.Position;
+                var jpPos = nodes[secondParents[pj]].Position;
+                var jPos = second.Position;
                 // swap to nodes positions to remove a crossing.
                 // this only works out when it is possible.
                 // if there still are crossings in this layer after this step, the parent sub-graphs need to be re-ordered.
@@ -331,6 +403,7 @@ public class TalentGraphLayout : MonoBehaviour
                 Color color = node.RuntimeLevel - nodes[pi].RuntimeLevel > 1 ? Color.red : Color.white; 
                 Debug.DrawLine(node.RuntimeInstance.position, nodes[pi].RuntimeInstance.position, color);
             }
+            Debug.DrawLine(node.RuntimeInstance.position, node.RuntimeInstance.position + new Vector3(0,800, 0), Color.green);
         }
     }
 
@@ -338,23 +411,23 @@ public class TalentGraphLayout : MonoBehaviour
     {
         foreach(var node in nodes)
         {
-            float x = node.RuntimeInstance.anchoredPosition.x;
+            float x = node.PosX;
             foreach (int parentIndex in node.ParentIndices)
-                x += nodes[parentIndex].RuntimeInstance.anchoredPosition.x;
+                x += nodes[parentIndex].PosX;
             foreach (int childIndex in childNodes[node.NodeIndex])
-                x += nodes[childIndex].RuntimeInstance.anchoredPosition.x;
+                x += nodes[childIndex].PosX;
             x /= 1 + node.ParentIndices.Length + childNodes[node.NodeIndex].Length;
-            node.Drift = (x - node.RuntimeInstance.anchoredPosition.x) * driftCoefficient;
+            node.Drift = (x - node.PosX) * driftCoefficient;
         }
 
         foreach (var group in groups)
         {
-            var sortedGroup = group.OrderBy(n => n.RuntimeInstance.anchoredPosition.x).ToArray();
+            var sortedGroup = group.OrderBy(n => n.PosX).ToArray();
             // spacing within layer
             for (int i = 0; i < sortedGroup.Length-1; i++) {
                 var node = sortedGroup[i];
                 var nextNode = sortedGroup[i+1];
-                var dist = nextNode.RuntimeInstance.anchoredPosition.x - node.RuntimeInstance.position.x;
+                var dist = nextNode.PosX - node.RuntimeInstance.position.x;
                 dist /= driftDivider;
                 dist = 1 / (dist * dist);
                 node.Drift -= dist;
@@ -364,7 +437,7 @@ public class TalentGraphLayout : MonoBehaviour
 
         foreach (var node in nodes)
         {
-            node.RuntimeInstance.anchoredPosition += new Vector2(node.Drift, 0);
+            node.Position += new Vector2(node.Drift, 0);
         }
     }
 
